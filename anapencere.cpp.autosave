@@ -1,0 +1,140 @@
+#include "anapencere.h"
+#include "ui_anapencere.h"
+#include "benimseriport.h"
+#include <QSerialPortInfo>
+#include <QSerialPort>
+#include <QDebug>
+#include <QMessageBox>
+#include <QString>
+
+AnaPencere::AnaPencere(QWidget *parent) :
+    QMainWindow(parent),
+    ui(new Ui::AnaPencere)
+{
+    ui->setupUi(this);
+    setWindowTitle("Modbus RTU QT C++");
+    ui->statusBar->showMessage("Durum: Bağlı Değil");
+    ui->comboBox_2->addItems({"9600","38400","115200"});
+    ui->comboBox_3->addItems({"8,O,1","8,E,1","8,N,2"});
+    //bu bölümde bilgisayardaki halihazırda bulunun seri portların combobox ta listelenmesi sağlanır.
+    //this section gives the available ports list in computer by combobox
+    foreach (const QSerialPortInfo ports, QSerialPortInfo::availablePorts()){
+        ui->comboBox->addItem(ports.portName());
+    }
+    serialPort=new QSerialPort(this);
+    //Seri porttan veri girişi olduğunda readData fonksiyonunu çağırır.
+    // calls readData function while data comes to serial port
+    connect(serialPort,&QSerialPort::readyRead,this,&AnaPencere::readData);
+
+
+
+}
+
+AnaPencere::~AnaPencere()
+{
+    delete ui;
+    serialPort->close();
+}
+
+void AnaPencere::on_pushButton_2_clicked()
+{
+
+    serialPort->setPortName(ui->comboBox->currentText().trimmed());
+    QString ayar=ui->comboBox_3->currentText();
+    QString a1=ayar.mid(0, 1);
+    QString a2=ayar.mid(2,1);
+    QString a3=ayar.mid(4,1);
+    if(a1=="8"){
+        serialPort->setDataBits(QSerialPort::Data8);
+    }
+    if(a2=="N"){
+       serialPort->setParity(QSerialPort::NoParity);
+    }else if (a2=="E") {
+        serialPort->setParity(QSerialPort::EvenParity);
+
+    }else if (a2=="O") {
+        serialPort->setParity(QSerialPort::OddParity);
+    }
+    if(a3=="1"){
+        serialPort->setStopBits(QSerialPort::OneStop);
+    }else if(a3=="2"){
+        serialPort->setStopBits(QSerialPort::TwoStop);
+    }
+
+    serialPort->setBaudRate(ui->comboBox_2->currentText().toInt());
+    if(serialPort->open(QIODevice::ReadWrite)){
+        serialPort->clear();
+        ui->pushButton_2->setDisabled(true);
+        ui->pushButton->setEnabled(true);
+        ui->pushButtonGonder->setEnabled(true);
+        ui->statusBar->showMessage("Durum: Bağlı"); //Shows wether connection established "Status : Online"
+    }else{
+        QMessageBox::critical(this, tr("Error"), serialPort->errorString());
+    }
+
+
+}
+
+void AnaPencere::on_pushButton_clicked()
+{
+    serialPort->close();
+    ui->pushButton->setDisabled(true);
+    ui->pushButton_2->setEnabled(true);
+    ui->statusBar->showMessage("Durum: Bağlı Değil"); // Shows wether connection close has done "Status: Oflline" 
+    ui->pushButtonGonder->setEnabled(false);
+
+
+}
+void AnaPencere::readData()
+{
+    rData=serialPort->readAll();
+    // rData.append(serialPort->readAll());
+    ui->textEdit->append(rData.toHex().toUpper());
+
+
+}
+
+void AnaPencere::on_pushButtonGonder_clicked()
+{
+
+    QString veri=ui->lineEdit->text()+ui->lineEdit_2->text()+ui->lineEdit_3->text();
+//  qDebug() << veri;
+    QByteArray veri2;
+
+    for(int i=0;i<veri.length();i+=2){
+        QString a1=veri.mid(i,2);
+        bool ok;
+        unsigned int den=a1.toUInt(&ok,16);
+//      qDebug() << a1 << ":" << den;
+        veri2.append(char(den));
+
+    }
+    unsigned char uzunluk=uchar(veri2.length());
+    unsigned int crc=crc_chk(reinterpret_cast<unsigned char*> (veri2.data()),uzunluk);
+    //unsigned int crc=crc_chk((unsigned char*)veri2.data(),uzunluk);
+    // LSbyte
+    veri2.append(char(crc&0x00FF));
+    //MSByte
+    veri2.append(char(crc>>8));
+    ui->lineEdit_4->setText( QString("%1").arg(crc , 0, 16));
+    serialPort->write(veri2);
+}
+unsigned int AnaPencere:: crc_chk(unsigned char* data, unsigned char length)
+{
+    int j;
+    unsigned int reg_crc=0xFFFF;
+    while(length--){
+
+       reg_crc ^= *data++;
+        for(j=0;j<8;j++){
+            if(reg_crc & 0x01){ /* LSB(b0)=1 */
+                reg_crc=(reg_crc>>1) ^ 0xA001;
+            }else{
+               reg_crc=reg_crc >>1;
+            }
+        }
+    }
+    return reg_crc;
+}
+
+
